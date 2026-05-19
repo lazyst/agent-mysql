@@ -1,6 +1,6 @@
 import { Connection } from 'mysql2/promise'
 import { executeSQL } from '../core/executor'
-import { formatSuccess, formatError } from '../core/formatter'
+import { formatSuccess, formatError, escapeId } from '../core/formatter'
 
 export async function databasesCommand(conn: Connection): Promise<string> {
   try {
@@ -18,7 +18,7 @@ export async function databasesCommand(conn: Connection): Promise<string> {
 export async function tablesCommand(conn: Connection, database?: string): Promise<string> {
   try {
     if (database) {
-      await conn.execute(`USE \`${database}\``)
+      await conn.execute(`USE ${escapeId(database)}`)
     }
     const result = await executeSQL(conn, 'SHOW TABLES')
     const tableKey = Object.keys(result.rows[0] || {})[0] || `Tables_in_${database || 'unknown'}`
@@ -35,8 +35,8 @@ export async function tablesCommand(conn: Connection, database?: string): Promis
 
 export async function descCommand(conn: Connection, table: string): Promise<string> {
   try {
-    const columnsResult = await executeSQL(conn, `SHOW COLUMNS FROM \`${table}\``)
-    const indexesResult = await executeSQL(conn, `SHOW INDEX FROM \`${table}\``)
+    const columnsResult = await executeSQL(conn, `SHOW COLUMNS FROM ${escapeId(table)}`)
+    const indexesResult = await executeSQL(conn, `SHOW INDEX FROM ${escapeId(table)}`)
 
     const indexes = indexesResult.rows.map((r: any) => ({
       key_name: r.Key_name,
@@ -66,7 +66,7 @@ export async function descCommand(conn: Connection, table: string): Promise<stri
 
 export async function schemaCommand(conn: Connection, table: string): Promise<string> {
   try {
-    const result = await executeSQL(conn, `SHOW CREATE TABLE \`${table}\``)
+    const result = await executeSQL(conn, `SHOW CREATE TABLE ${escapeId(table)}`)
     const createSQL = (result.rows[0] as any)?.['Create Table'] || ''
     return formatSuccess({
       command: 'schema',

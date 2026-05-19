@@ -1,6 +1,6 @@
 import { Connection } from 'mysql2/promise'
 import { executeSQL } from '../core/executor'
-import { formatSuccess, formatError } from '../core/formatter'
+import { formatSuccess, formatError, escapeId } from '../core/formatter'
 import * as fs from 'fs'
 
 export async function exportCommand(
@@ -9,7 +9,7 @@ export async function exportCommand(
   options: { format: string; output?: string; where?: string; limit?: number }
 ): Promise<string> {
   try {
-    let sql = `SELECT * FROM \`${table}\``
+    let sql = `SELECT * FROM ${escapeId(table)}`
     if (options.where) sql += ` WHERE ${options.where}`
     if (options.limit) sql += ` LIMIT ${options.limit}`
 
@@ -28,16 +28,18 @@ export async function exportCommand(
           break
         }
         const headers = Object.keys(result.rows[0])
-        const csvLines = [headers.join(',')]
+        const escapeCSV = (s: string) =>
+          s.includes(',') || s.includes('"') || s.includes('\n')
+            ? `"${s.replace(/"/g, '""')}"`
+            : s
+        const csvLines = [headers.map(escapeCSV).join(',')]
     for (const row of result.rows) {
       csvLines.push(headers.map(h => {
         let val = (row as any)[h]
         if (val === null || val === undefined) return ''
         if (val instanceof Date) val = val.toISOString().replace('T', ' ').replace('Z', '')
         const str = String(val)
-        return str.includes(',') || str.includes('"') || str.includes('\n')
-          ? `"${str.replace(/"/g, '""')}"`
-          : str
+        return escapeCSV(str)
       }).join(','))
     }
         output = csvLines.join('\n')
@@ -57,7 +59,7 @@ export async function exportCommand(
             if (typeof v === 'number') return String(v)
             return `'${String(v).replace(/'/g, "\\'")}'`
           })
-          return `INSERT INTO \`${table}\` (\`${columns.join('`, `')}\`) VALUES (${values.join(', ')});`
+          return `INSERT INTO ${escapeId(table)} (${columns.map(escapeId).join(', ')}) VALUES (${values.join(', ')});`
         })
         output = lines.join('\n') + '\n'
         break
@@ -77,8 +79,13 @@ export async function exportCommand(
       })
     }
 
-    process.stdout.write(output)
-    return ''
+    return formatSuccess({
+      command: 'export',
+      table,
+      format,
+      rows: result.rows.length,
+      data: output,
+    })
   } catch (err: any) {
     return formatError('export', err)
   }
@@ -99,7 +106,7 @@ export async function importCommand(
       return formatError('import', { code: 'ER_EMPTY_FILE', message: 'File is empty' })
     }
 
-    const format = options.format === 'auto' ? detectFormat(file, content) : options.format
+    const format = options.format === 'auto' ? detectFormat(file) : options.format
     let result
 
     switch (format) {
@@ -119,10 +126,15 @@ export async function importCommand(
         return await insertCSV(conn, table, content)
       }
       case 'sql': {
-        const statements = content
+        // Strip SQL comments before splitting into statements
+        const cleanContent = content
+          .replace(/--.*$/gm, '')
+          .replace(/#.*$/gm, '')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+        const statements = cleanContent
           .split(';')
           .map(s => s.trim())
-          .filter(s => s.length > 0 && !s.startsWith('--') && !s.startsWith('#'))
+          .filter(s => s.length > 0)
         let totalAffected = 0
         for (const stmt of statements) {
           const r = await executeSQL(conn, stmt)
@@ -144,7 +156,7 @@ export async function importCommand(
   }
 }
 
-function detectFormat(file: string, _content: string): string {
+function detectFormat(file: string): string {
   if (file.endsWith('.json')) return 'json'
   if (file.endsWith('.csv')) return 'csv'
   if (file.endsWith('.sql')) return 'sql'
@@ -164,8 +176,8 @@ async function insertJSON(conn: Connection, table: string, data: any): Promise<s
 
   const columns = Object.keys(rows[0])
   const placeholders = columns.map(() => '?').join(', ')
-  const colList = columns.map(c => `\`${c}\``).join(', ')
-  const sql = `INSERT INTO \`${table}\` (${colList}) VALUES (${placeholders})`
+  const colList = columns.map(escapeId).join(', ')
+  const sql = `INSERT INTO ${escapeId(table)} (${colList}) VALUES (${placeholders})`
 
   let totalAffected = 0
   for (const row of rows) {
@@ -184,9 +196,9 @@ async function insertCSV(conn: Connection, table: string, content: string): Prom
   }
 
   const headers = parseCSVLine(lines[0])
-  const colList = headers.map(h => `\`${h}\``).join(', ')
+  const colList = headers.map(escapeId).join(', ')
   const placeholders = headers.map(() => '?').join(', ')
-  const sql = `INSERT INTO \`${table}\` (${colList}) VALUES (${placeholders})`
+  const sql = `INSERT INTO ${escapeId(table)} (${colList}) VALUES (${placeholders})`
 
   let totalAffected = 0
   for (let i = 1; i < lines.length; i++) {

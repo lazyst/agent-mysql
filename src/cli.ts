@@ -43,9 +43,17 @@ function resolveOptions(cmd: Command): ConnectionOptions {
 
   if (opts.use) {
     const profile = getProfile(opts.use)
-    if (profile) return profile
-    console.error(JSON.stringify({ success: false, error: { code: 'ER_PROFILE_NOT_FOUND', message: `Profile '${opts.use}' not found` }, command: 'connect' }))
-    process.exit(1)
+    if (!profile) {
+      console.error(JSON.stringify({ success: false, error: { code: 'ER_PROFILE_NOT_FOUND', message: `Profile '${opts.use}' not found` }, command: 'connect' }))
+      process.exit(1)
+    }
+    if (opts.database) profile.database = opts.database
+    // Allow CLI flags to override profile fields when explicitly passed
+    if (cmd.getOptionValueSource?.('host') === 'cli') profile.host = opts.host
+    if (cmd.getOptionValueSource?.('port') === 'cli') profile.port = parseInt(opts.port, 10)
+    if (cmd.getOptionValueSource?.('user') === 'cli') profile.user = opts.user
+    if (cmd.getOptionValueSource?.('password') === 'cli') profile.password = opts.password
+    return profile
   }
 
   if (opts.user || opts.password) {
@@ -59,7 +67,11 @@ function resolveOptions(cmd: Command): ConnectionOptions {
   }
 
   const defaultProfile = getDefaultProfile()
-  if (defaultProfile) return defaultProfile
+  if (defaultProfile) {
+    const profile = { ...defaultProfile }
+    if (opts.database) profile.database = opts.database
+    return profile
+  }
 
   console.error(JSON.stringify({ success: false, error: { code: 'ER_NO_CONNECTION', message: 'No connection info provided. Use -h/-u/-p, --dsn, --use <profile>, or save a default profile via "config set"' }, command: 'connect' }))
   process.exit(1)
@@ -80,7 +92,7 @@ async function run(cmd: Command, fn: (conn: any) => Promise<string>) {
     const result = await withConnection(cmd, fn)
     if (result) process.stdout.write(result + '\n')
   } catch (err: any) {
-    process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_CONNECTION', message: err.message }, command: 'connect' }) + '\n')
+    process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_EXECUTION', message: err.message }, command: 'execute' }) + '\n')
     process.exit(1)
   }
 }
@@ -94,9 +106,17 @@ program
   .option('--offset <number>', 'Offset for SELECT')
   .option('--force', 'Allow destructive operations (DROP/TRUNCATE/ALTER/DELETE without WHERE)')
   .action((sql, options) => {
+    let params: any[] | undefined
+    if (options.params) {
+      try { params = JSON.parse(options.params) } catch {
+        process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_INVALID_JSON', message: `Invalid --params: ${options.params}` }, command: 'query' }) + '\n')
+        process.exit(1)
+        return
+      }
+    }
     run(program, (conn) =>
       queryCommand(conn, sql, {
-        params: options.params ? JSON.parse(options.params) : undefined,
+        params,
         limit: parseInt(options.limit, 10),
         offset: options.offset ? parseInt(options.offset, 10) : undefined,
         force: !!options.force,
@@ -140,11 +160,25 @@ program
   .requiredOption('--data <json>', 'Data as JSON object or array')
   .option('--upsert', 'Use INSERT ON DUPLICATE KEY UPDATE')
   .option('--keys <json>', 'Unique key columns as JSON array (for upsert)')
-  .action((table, options) =>
+  .action((table, options) => {
+    let data: any
+    try { data = JSON.parse(options.data) } catch {
+      process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_INVALID_JSON', message: `Invalid --data: ${options.data}` }, command: 'insert' }) + '\n')
+      process.exit(1)
+      return
+    }
+    let keys: string[] | undefined
+    if (options.keys) {
+      try { keys = JSON.parse(options.keys) } catch {
+        process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_INVALID_JSON', message: `Invalid --keys: ${options.keys}` }, command: 'insert' }) + '\n')
+        process.exit(1)
+        return
+      }
+    }
     run(program, (conn) =>
-      insertCommand(conn, table, JSON.parse(options.data), !!options.upsert, options.keys ? JSON.parse(options.keys) : undefined)
+      insertCommand(conn, table, data, !!options.upsert, keys)
     )
-  )
+  })
 
 program
   .command('update')
@@ -156,10 +190,17 @@ program
   .action((table, options) => {
     if (!options.where) {
       process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_MISSING_WHERE', message: '--where is required for UPDATE' }, command: 'update' }) + '\n')
+      process.exit(1)
+      return
+    }
+    let setData: any
+    try { setData = JSON.parse(options.set) } catch {
+      process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_INVALID_JSON', message: `Invalid --set: ${options.set}` }, command: 'update' }) + '\n')
+      process.exit(1)
       return
     }
     run(program, (conn) =>
-      updateCommand(conn, table, JSON.parse(options.set), options.where, !!options.force)
+      updateCommand(conn, table, setData, options.where, !!options.force)
     )
   })
 
@@ -172,6 +213,7 @@ program
   .action((table, options) => {
     if (!options.where) {
       process.stdout.write(JSON.stringify({ success: false, error: { code: 'ER_MISSING_WHERE', message: '--where is required for DELETE' }, command: 'delete' }) + '\n')
+      process.exit(1)
       return
     }
     run(program, (conn) =>

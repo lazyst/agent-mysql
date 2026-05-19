@@ -19,7 +19,7 @@ export async function executeSQL(conn: Connection, sql: string, params?: any[]):
       fields: (fields as FieldPacket[]).map(f => ({
         name: f.name,
         type: f.type?.toString() || 'unknown',
-        nullable: !f.flags || !(f.flags & 1),
+        nullable: !f.flags || !(Number(f.flags) & 1),
       })),
     }
   }

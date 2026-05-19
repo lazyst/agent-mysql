@@ -5,10 +5,6 @@ import { ConfigStore, ConfigProfile } from '../types'
 const CONFIG_DIR = path.join(process.cwd(), '.agent-mysql')
 const CONFIG_FILE = path.join(CONFIG_DIR, 'config.json')
 
-function getConfigPath(): string {
-  return CONFIG_FILE
-}
-
 function ensureConfigDir(): void {
   const dir = path.dirname(CONFIG_FILE)
   if (!fs.existsSync(dir)) {

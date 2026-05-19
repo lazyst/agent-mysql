@@ -16,15 +16,21 @@ export async function queryCommand(
   }
 
   let finalSQL = sql
-  if (options.limit && /^\s*SELECT\s/i.test(sql)) {
-    const hasLimit = /\bLIMIT\s+\d+/i.test(sql)
-    if (!hasLimit) {
-      finalSQL = `${sql.replace(/;?\s*$/, '')} LIMIT ${options.limit}`
+  const isSelectQuery = /^\s*(?:WITH\b[\s\S]*\bSELECT\b|SELECT)\s/is.test(sql)
+
+  let hasExistingLimit = /\bLIMIT\s+\d+/i.test(finalSQL)
+  if (options.limit && isSelectQuery) {
+    if (!hasExistingLimit) {
+      finalSQL = `${finalSQL.replace(/;?\s*$/, '')} LIMIT ${options.limit}`
+      hasExistingLimit = true
     }
   }
-  if (options.offset && /^\s*SELECT\s/i.test(sql)) {
-    const hasOffset = /\bOFFSET\s+\d+/i.test(sql)
+  if (options.offset && isSelectQuery) {
+    const hasOffset = /\bOFFSET\s+\d+/i.test(finalSQL)
     if (!hasOffset) {
+      if (!hasExistingLimit) {
+        finalSQL = `${finalSQL.replace(/;?\s*$/, '')} LIMIT 18446744073709551615`
+      }
       finalSQL = `${finalSQL.replace(/;?\s*$/, '')} OFFSET ${options.offset}`
     }
   }

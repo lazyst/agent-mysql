@@ -1,3 +1,8 @@
+/** Escape a SQL identifier (table/column name) by doubling internal backticks */
+export function escapeId(id: string): string {
+  return '`' + id.replace(/`/g, '``') + '`'
+}
+
 export function formatSuccess(data: Record<string, unknown>): string {
   return JSON.stringify({ success: true, ...data })
 }

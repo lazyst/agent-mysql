@@ -1,5 +1,3 @@
-import { Connection } from 'mysql2/promise'
-
 const DESTRUCTIVE_PATTERNS = [
   /^\s*DROP\s/i,
   /^\s*TRUNCATE\s/i,
@@ -32,4 +30,38 @@ export function validateSQL(sql: string, force: boolean): string | null {
     }
   }
   return null
+}
+
+/**
+ * Check if a WHERE clause is trivially always-true (e.g. `1=1`, `TRUE`, `1`).
+ * Strips SQL comments and normalizes whitespace before checking.
+ */
+export function isAlwaysTrueWhere(where: string): boolean {
+  const cleaned = where
+    .replace(/--.*$/gm, '')
+    .replace(/#.*$/gm, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .trim()
+  if (!cleaned) return true
+
+  const s = cleaned.replace(/\s+/g, '')
+  const u = s.toUpperCase()
+
+  if (s === '1' || u === 'TRUE') return true
+
+  // Numeric comparison that always evaluates to true (e.g. 1=1, 2>1)
+  const numCmp = s.match(/^(\d+)([=<>!]+)(\d+)$/)
+  if (numCmp) {
+    const a = parseInt(numCmp[1], 10), op = numCmp[2], b = parseInt(numCmp[3], 10)
+    switch (op) {
+      case '=': case '==': return a === b
+      case '!=': case '<>': return a !== b
+      case '>': return a > b
+      case '<': return a < b
+      case '>=': return a >= b
+      case '<=': return a <= b
+    }
+  }
+
+  return false
 }

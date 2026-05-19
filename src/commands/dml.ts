@@ -1,6 +1,7 @@
 import { Connection } from 'mysql2/promise'
 import { executeSQL } from '../core/executor'
-import { formatSuccess, formatError } from '../core/formatter'
+import { formatSuccess, formatError, escapeId } from '../core/formatter'
+import { isAlwaysTrueWhere } from '../core/error-handler'
 
 export async function insertCommand(
   conn: Connection,
@@ -24,15 +25,27 @@ export async function insertCommand(
     }
 
     const columns = Object.keys(rows[0])
-    const placeholders = columns.map(() => '?').join(', ')
-    const columnList = columns.map(c => `\`${c}\``).join(', ')
 
-    let sql = `INSERT INTO \`${table}\` (${columnList}) VALUES (${placeholders})`
+    // Check all rows have same keys
+    for (let i = 1; i < rows.length; i++) {
+      const keys = Object.keys(rows[i])
+      const diff = keys.filter(k => !columns.includes(k)).concat(columns.filter(k => !keys.includes(k)))
+      if (diff.length > 0) {
+        return formatError('insert', {
+          code: 'ER_INCONSISTENT_KEYS',
+          message: `Row ${i} has different keys than row 0: ${diff.join(', ')}`,
+        })
+      }
+    }
+    const placeholders = columns.map(() => '?').join(', ')
+    const columnList = columns.map(escapeId).join(', ')
+
+    let sql = `INSERT INTO ${escapeId(table)} (${columnList}) VALUES (${placeholders})`
 
     if (upsert && keys && keys.length > 0) {
       const updates = columns
         .filter(c => !keys.includes(c))
-        .map(c => `\`${c}\` = VALUES(\`${c}\`)`)
+        .map(c => `${escapeId(c)} = VALUES(${escapeId(c)})`)
       if (updates.length > 0) {
         sql += ` ON DUPLICATE KEY UPDATE ${updates.join(', ')}`
       }
@@ -76,7 +89,7 @@ export async function updateCommand(
       })
     }
 
-    if (!force && where.trim() === '1=1') {
+    if (!force && isAlwaysTrueWhere(where)) {
       return formatError('update', {
         code: 'ER_FULL_TABLE_UPDATE',
         message: 'Full table UPDATE requires --force flag',
@@ -84,10 +97,10 @@ export async function updateCommand(
     }
 
     const columns = Object.keys(setData)
-    const sets = columns.map(c => `\`${c}\` = ?`).join(', ')
+    const sets = columns.map(c => `${escapeId(c)} = ?`).join(', ')
     const values = columns.map(c => setData[c])
 
-    const sql = `UPDATE \`${table}\` SET ${sets} WHERE ${where}`
+    const sql = `UPDATE ${escapeId(table)} SET ${sets} WHERE ${where}`
     const result = await executeSQL(conn, sql, values)
 
     return formatSuccess({
@@ -115,14 +128,14 @@ export async function deleteCommand(
       })
     }
 
-    if (!force && where.trim() === '1=1') {
+    if (!force && isAlwaysTrueWhere(where)) {
       return formatError('delete', {
         code: 'ER_FULL_TABLE_DELETE',
         message: 'Full table DELETE requires --force flag',
       })
     }
 
-    const sql = `DELETE FROM \`${table}\` WHERE ${where}`
+    const sql = `DELETE FROM ${escapeId(table)} WHERE ${where}`
     const result = await executeSQL(conn, sql)
 
     return formatSuccess({
