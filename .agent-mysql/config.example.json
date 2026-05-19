@@ -1,0 +1,26 @@
+{
+  "profiles": {
+    "dev": {
+      "host": "localhost",
+      "port": 3306,
+      "user": "root",
+      "password": "",
+      "database": ""
+    },
+    "staging": {
+      "host": "staging.example.com",
+      "port": 3306,
+      "user": "root",
+      "password": "",
+      "database": ""
+    },
+    "prod": {
+      "host": "prod.example.com",
+      "port": 3306,
+      "user": "root",
+      "password": "",
+      "database": ""
+    }
+  },
+  "default": "dev"
+}
